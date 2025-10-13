@@ -5,11 +5,12 @@
 
 local M = {}
 
-M.is_nuxt_project = false
 M.original_definition = vim.lsp.buf.definition
+M.is_nuxt_project = false
 M.nuxt_directory_path = ""
+M.it_worked = false
 
-local default_check_directories = { "/apps/web", "/apps/nuxt", "/apps/frontend", "/apps/website" }
+local default_check_directories = { "", "/apps/web", "/apps/nuxt", "/apps/frontend", "/apps/website" }
 
 M.setup = function(opts)
 	opts = opts or {}
@@ -44,6 +45,46 @@ M.setup = function(opts)
 	-- M.nuxt_directory_path = ""
 end
 
+local redirect_if_auto_import = function()
+	if M.it_worked then
+		return
+	end
+
+	local line = vim.fn.getline(".")
+	local path = string.match(line, '".-/(.-)"')
+	local file = vim.fn.expand("%")
+
+	local auto_import_files = { "components.d.ts", "imports.d.ts" }
+
+	for _, auto_import_file in ipairs(auto_import_files) do
+		if string.find(file, auto_import_file) then
+			vim.api.nvim_buf_delete(0, { force = false })
+			vim.cmd("edit " .. M.nuxt_directory_path .. "/" .. path)
+			M.it_worked = true
+			break
+		elseif string.find(line, auto_import_file) then
+			if string.find(line, "stores") then
+				local storePath = string.match(line, "'.-/(.-)'")
+				vim.cmd("cclose")
+				vim.cmd("edit " .. M.nuxt_directory_path .. "/stores/" .. storePath .. ".ts")
+			elseif string.find(line, "composables") then
+				local composablePath = string.match(line, "'.-/(.-)'")
+				vim.cmd("cclose")
+				vim.cmd("edit " .. M.nuxt_directory_path .. "/composables/" .. composablePath .. ".ts")
+			elseif string.find(line, "utils") then
+				local utilsPath = string.match(line, "'.-/(.-)'")
+				vim.cmd("cclose")
+				vim.cmd("edit " .. M.nuxt_directory_path .. "/utils/" .. utilsPath .. ".ts")
+			else
+				vim.cmd("cclose")
+				vim.cmd("edit " .. M.nuxt_directory_path .. "/" .. path)
+			end
+			M.it_worked = true
+			break
+		end
+	end
+end
+
 M.watch = function()
 	M.original_definition()
 
@@ -51,39 +92,14 @@ M.watch = function()
 		return
 	end
 
+	-- retry with exponential backoff
+	vim.defer_fn(redirect_if_auto_import, 10)
+	vim.defer_fn(redirect_if_auto_import, 50)
+	vim.defer_fn(redirect_if_auto_import, 100)
+	vim.defer_fn(redirect_if_auto_import, 1000)
 	vim.defer_fn(function()
-		local line = vim.fn.getline(".")
-		local path = string.match(line, '".-/(.-)"')
-		local file = vim.fn.expand("%")
-
-		local auto_import_files = { "components.d.ts", "imports.d.ts" }
-
-		for _, auto_import_file in ipairs(auto_import_files) do
-			if string.find(file, auto_import_file) then
-				vim.api.nvim_buf_delete(0, { force = false })
-				vim.cmd("edit " .. M.nuxt_directory_path .. "/" .. path)
-				break
-			elseif string.find(line, auto_import_file) then
-				if string.find(line, "stores") then
-					local storePath = string.match(line, "'.-/(.-)'")
-					vim.cmd("cclose")
-					vim.cmd("edit " .. M.nuxt_directory_path .. "/stores/" .. storePath .. ".ts")
-				elseif string.find(line, "composables") then
-					local composablePath = string.match(line, "'.-/(.-)'")
-					vim.cmd("cclose")
-					vim.cmd("edit " .. M.nuxt_directory_path .. "/composables/" .. composablePath .. ".ts")
-				elseif string.find(line, "utils") then
-					local utilsPath = string.match(line, "'.-/(.-)'")
-					vim.cmd("cclose")
-					vim.cmd("edit " .. M.nuxt_directory_path .. "/utils/" .. utilsPath .. ".ts")
-				else
-					vim.cmd("cclose")
-					vim.cmd("edit " .. M.nuxt_directory_path .. "/" .. path)
-				end
-				break
-			end
-		end
-	end, 100)
+		M.it_worked = false
+	end, 1100)
 end
 
 return M
